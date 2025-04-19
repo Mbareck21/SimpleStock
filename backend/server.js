@@ -51,16 +51,37 @@ const db = new sqlite3.Database(DB_FILE, (err) => {
 
 // GET /api/items - Retrieve all inventory items
 app.get("/api/items", (req, res) => {
-	const sql = "SELECT * FROM items ORDER BY name ASC"; // Get all items, ordered by name
+	// Check if a 'search' query parameter was provided
+	const searchTerm = req.query.search;
 
-	db.all(sql, [], (err, rows) => {
+	let sql = "SELECT * FROM items";
+	const params = [];
+
+	// If a search term exists and is not empty, add a WHERE clause
+	if (searchTerm && String(searchTerm).trim() !== "") {
+		// Use LIKE with % wildcards for partial matching (case-insensitive by default in SQLite for ASCII)
+		// Search in both 'name' and 'description' columns
+		sql += " WHERE name LIKE ? OR description LIKE ?";
+		// Prepare the search term parameter for LIKE by adding wildcards
+		const likeTerm = `%${String(searchTerm).trim()}%`;
+		params.push(likeTerm, likeTerm); // Add the parameter twice (once for name, once for description)
+		console.log(`Searching items with term: ${likeTerm}`); // Log the search
+	}
+
+	// Always add the ORDER BY clause
+	sql += " ORDER BY name ASC";
+
+	// Execute the query (either the original or the filtered one)
+	db.all(sql, params, (err, rows) => {
 		if (err) {
 			console.error("Database error fetching items:", err.message);
-			// Send a generic server error response
+			// Log the problematic SQL and params for debugging
+			console.error("SQL:", sql);
+			console.error("Params:", params);
 			res.status(500).json({ error: "Failed to retrieve items from database" });
-			return; // Stop further execution in this callback
+			return;
 		}
-		// Send the retrieved rows as a JSON array
+		// Send the retrieved rows (filtered or all) as a JSON array
 		res.json(rows);
 	});
 });
@@ -208,11 +229,9 @@ app.put("/api/items/:id", (req, res) => {
 		// Check if any row was actually updated
 		if (this.changes === 0) {
 			// If no rows were affected, the item ID likely didn't exist
-			return res
-				.status(404)
-				.json({
-					error: "Item not found with the provided ID. No update performed.",
-				});
+			return res.status(404).json({
+				error: "Item not found with the provided ID. No update performed.",
+			});
 		} else {
 			// If update is successful (this.changes > 0):
 			console.log(`Item with ID: ${numItemId} has been updated.`);

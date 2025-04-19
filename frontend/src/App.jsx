@@ -7,80 +7,93 @@ const API_BASE_URL = "http://localhost:3001/api";
 function App() {
 	// --- State Variables ---
 	const [items, setItems] = useState([]);
-	const [isLoading, setIsLoading] = useState(true); // For initial fetch
-	const [error, setError] = useState(null); // For initial fetch/general errors
+	const [isLoading, setIsLoading] = useState(true);
+	const [error, setError] = useState(null);
 
-	// Form state (unified for Add/Edit inputs)
+	// Form state
 	const [formName, setFormName] = useState("");
 	const [formQuantity, setFormQuantity] = useState("");
 	const [formDescription, setFormDescription] = useState("");
 
 	// Edit mode state
-	const [editingItemId, setEditingItemId] = useState(null); // ID of item being edited, or null
+	const [editingItemId, setEditingItemId] = useState(null);
 
-	// **Separated** Loading/Error States for Operations
+	// Operation States
 	const [isAdding, setIsAdding] = useState(false);
 	const [addError, setAddError] = useState(null);
 	const [isUpdating, setIsUpdating] = useState(false);
 	const [updateError, setUpdateError] = useState(null);
 	const [deleteError, setDeleteError] = useState(null);
 
-	// --- Data Fetching ---
-	const fetchItems = useCallback(async () => {
-		console.log("Fetching items...");
+	// *** NEW: Search State ***
+	const [searchTerm, setSearchTerm] = useState(""); // State for the search input
+
+	// --- Data Fetching (Modified) ---
+	// Now accepts the current search term to pass to the API
+	const fetchItems = useCallback(async (currentSearchTerm) => {
+		console.log(`Fetching items with search term: "${currentSearchTerm}"`);
 		setIsLoading(true);
 		setError(null);
+		// Clear operational errors when fetching
 		setDeleteError(null);
-		setAddError(null); // Clear operation errors on fetch
+		setAddError(null);
 		setUpdateError(null);
+
+		// Prepare query parameters
+		const params = {};
+		if (currentSearchTerm && currentSearchTerm.trim() !== "") {
+			params.search = currentSearchTerm.trim();
+		}
+
 		try {
-			const response = await axios.get(`${API_BASE_URL}/items`);
+			// Pass params to axios.get - axios automatically formats them into query string
+			const response = await axios.get(`${API_BASE_URL}/items`, { params });
 			setItems(response.data);
 		} catch (err) {
 			console.error("Error fetching items:", err);
 			setError(
-				"Failed to fetch inventory items. Ensure the backend is running.",
+				"Failed to fetch inventory items. Please check connection or backend server.",
 			);
-			setItems([]);
+			setItems([]); // Clear items on error
 		} finally {
 			setIsLoading(false);
 		}
-	}, []);
+	}, []); // useCallback dependency array is empty as it doesn't depend on component state directly
 
+	// --- Effect to Fetch Items on Mount AND when searchTerm changes ---
 	useEffect(() => {
-		fetchItems();
-	}, [fetchItems]);
+		// This effect now runs initially and whenever 'searchTerm' or 'fetchItems' changes.
+		// We pass the current 'searchTerm' state to fetchItems.
+		fetchItems(searchTerm);
+	}, [searchTerm, fetchItems]); // Add searchTerm to dependency array
 
-	// --- Reset Form ---
+	// --- Reset Form (existing) ---
 	const resetForm = () => {
 		setFormName("");
 		setFormQuantity("");
 		setFormDescription("");
 		setEditingItemId(null);
-		setAddError(null); // Clear specific errors on reset
+		setAddError(null);
 		setUpdateError(null);
 	};
 
-	// --- Start Editing ---
+	// --- Start Editing (existing) ---
 	const handleStartEdit = (item) => {
 		setEditingItemId(item.id);
 		setFormName(item.name);
 		setFormQuantity(String(item.quantity));
 		setFormDescription(item.description || "");
-		setAddError(null); // Clear errors when starting edit
+		setAddError(null);
 		setUpdateError(null);
 		window.scrollTo(0, document.body.scrollHeight);
 	};
 
-	// --- Form Submission Handler (Still unified logic, but uses separate states) ---
+	// --- Form Submission Handler (existing) ---
 	const handleSubmit = async (event) => {
 		event.preventDefault();
-
-		// Validation (common for both)
+		// ... (validation logic remains the same) ...
 		const quantityNum = parseInt(formQuantity, 10);
 		if (!formName.trim() || isNaN(quantityNum) || quantityNum < 0) {
-			// Show error based on mode, but use a generic message here maybe? Or set both?
-			// Let's set a generic form error or use updateError if editing? Simpler to use one:
 			if (editingItemId) {
 				setUpdateError(
 					"Please enter a valid item name and a non-negative quantity.",
@@ -90,7 +103,7 @@ function App() {
 					"Please enter a valid item name and a non-negative quantity.",
 				);
 			}
-			return; // Stop submission
+			return;
 		}
 
 		const itemData = {
@@ -99,58 +112,52 @@ function App() {
 			description: formDescription.trim() || null,
 		};
 
-		// --- Call Appropriate API based on mode ---
 		if (editingItemId) {
-			// --- UPDATE ---
-			setUpdateError(null); // Clear previous update error
-			setIsUpdating(true); // Set updating flag
+			// UPDATE
+			setUpdateError(null);
+			setIsUpdating(true);
 			try {
-				console.log(`Updating item ${editingItemId} with data:`, itemData);
 				const response = await axios.put(
 					`${API_BASE_URL}/items/${editingItemId}`,
 					itemData,
 				);
-				setItems((prevItems) =>
-					prevItems
-						.map((item) => (item.id === editingItemId ? response.data : item))
-						.sort((a, b) => a.name.localeCompare(b.name)),
-				);
-				console.log("Update successful:", response.data);
-				resetForm(); // Reset form on success
+				// *** RE-FETCH after update to reflect potential search filtering ***
+				// Instead of just updating state locally, re-fetch to ensure consistency with search
+				fetchItems(searchTerm); // <-- Changed this line
+				console.log("Update successful, re-fetching list...");
+				resetForm();
 			} catch (err) {
+				// ... (error handling) ...
 				console.error(`Error updating item:`, err);
 				const backendError =
 					err.response?.data?.error || "An unexpected error occurred.";
 				setUpdateError(`Failed to update item: ${backendError}`);
 			} finally {
-				setIsUpdating(false); // Clear updating flag
+				setIsUpdating(false);
 			}
 		} else {
-			// --- ADD ---
-			setAddError(null); // Clear previous add error
-			setIsAdding(true); // Set adding flag
+			// ADD
+			setAddError(null);
+			setIsAdding(true);
 			try {
-				console.log("Adding new item with data:", itemData);
 				const response = await axios.post(`${API_BASE_URL}/items`, itemData);
-				setItems((prevItems) =>
-					[...prevItems, response.data].sort((a, b) =>
-						a.name.localeCompare(b.name),
-					),
-				);
-				console.log("Add successful:", response.data);
-				resetForm(); // Reset form on success
+				// *** RE-FETCH after add to reflect potential search filtering ***
+				fetchItems(searchTerm); // <-- Changed this line
+				console.log("Add successful, re-fetching list...");
+				resetForm();
 			} catch (err) {
+				// ... (error handling) ...
 				console.error(`Error adding item:`, err);
 				const backendError =
 					err.response?.data?.error || "An unexpected error occurred.";
 				setAddError(`Failed to add item: ${backendError}`);
 			} finally {
-				setIsAdding(false); // Clear adding flag
+				setIsAdding(false);
 			}
 		}
 	};
 
-	// --- Delete Item Logic (existing, ensures clearing specific errors) ---
+	// --- Delete Item Logic (Modified) ---
 	const handleDeleteItem = async (itemIdToDelete) => {
 		if (!window.confirm("Are you sure you want to delete this item?")) {
 			return;
@@ -162,15 +169,17 @@ function App() {
 
 		try {
 			await axios.delete(`${API_BASE_URL}/items/${itemIdToDelete}`);
-			setItems((prevItems) =>
-				prevItems.filter((item) => item.id !== itemIdToDelete),
+			// *** RE-FETCH after delete to update the list correctly based on search ***
+			fetchItems(searchTerm); // <-- Changed this line
+			console.log(
+				`Item ${itemIdToDelete} deleted successfully, re-fetching list.`,
 			);
-			// Clear other errors on successful delete
+			// No need to manually filter state if we re-fetch
 			setAddError(null);
 			setUpdateError(null);
 			setError(null);
-			console.log(`Item ${itemIdToDelete} deleted successfully.`);
 		} catch (err) {
+			// ... (error handling) ...
 			console.error(`Error deleting item with ID ${itemIdToDelete}:`, err);
 			const backendError =
 				err.response?.data?.error || "An unexpected error occurred.";
@@ -185,17 +194,49 @@ function App() {
 		<div className='App'>
 			<h1>SimpleStock Inventory</h1>
 
+			{/* --- Search Bar --- */}
+			<div
+				style={{ margin: "20px 0", padding: "10px", border: "1px solid #ccc" }}>
+				<label htmlFor='searchItems' style={{ marginRight: "10px" }}>
+					Search Items:
+				</label>
+				<input
+					type='text'
+					id='searchItems'
+					placeholder='Search by name or description...'
+					value={searchTerm}
+					onChange={(e) => setSearchTerm(e.target.value)} // Update state on change
+					style={{ width: "300px", padding: "5px" }}
+					disabled={isLoading} // Optional: disable during initial load
+				/>
+				{/* Optional: Button to clear search */}
+				<button
+					onClick={() => setSearchTerm("")}
+					disabled={!searchTerm || isLoading} // Disable if no term or loading
+					style={{ marginLeft: "10px" }}>
+					Clear Search
+				</button>
+			</div>
+
 			{/* Display Global Errors/Loading */}
+			{/* (Keep isLoading display for clarity during search fetches) */}
 			{isLoading && <p>Loading inventory...</p>}
 			{error && <p style={{ color: "red" }}>{error}</p>}
 			{deleteError && <p style={{ color: "red" }}>{deleteError}</p>}
 
 			{/* Display Item List */}
-			{!isLoading && !error && (
-				<div>
-					<h2>Current Stock</h2>
-					{items.length === 0 ? (
-						<p>No items currently in stock.</p>
+			{/* Show list section even if loading, the table itself depends on !isLoading */}
+			<div>
+				<h2>Current Stock {searchTerm && `(Filtered by: "${searchTerm}")`}</h2>
+				{/* Only show table when not loading AND no general fetch error */}
+				{!isLoading &&
+					!error &&
+					(items.length === 0 ? (
+						<p>
+							{searchTerm
+								? "No items match your search."
+								: "No items currently in stock."}
+						</p>
 					) : (
 						<table
 							border='1'
@@ -204,6 +245,7 @@ function App() {
 								borderCollapse: "collapse",
 								marginBottom: "20px",
 							}}>
+							{/* ... Table Head ... */}
 							<thead>
 								<tr>
 									<th style={{ padding: "5px" }}>Name</th>
@@ -212,6 +254,7 @@ function App() {
 									<th style={{ padding: "5px", width: "120px" }}>Actions</th>
 								</tr>
 							</thead>
+							{/* ... Table Body ... */}
 							<tbody>
 								{items.map((item) => (
 									<tr
@@ -227,35 +270,38 @@ function App() {
 										</td>
 										<td style={{ padding: "5px" }}>{item.description}</td>
 										<td style={{ padding: "5px", textAlign: "center" }}>
+											{/* Action Buttons (disable based on operation state) */}
 											<button
 												onClick={() => handleStartEdit(item)}
-												// Disable if adding OR updating OR already editing this one
 												disabled={
 													isAdding || isUpdating || editingItemId === item.id
 												}
 												style={{ marginRight: "5px" }}>
-												Edit
+												{" "}
+												Edit{" "}
 											</button>
 											<button
 												onClick={() => handleDeleteItem(item.id)}
-												// Disable if adding OR updating
 												disabled={isAdding || isUpdating}>
-												Delete
+												{" "}
+												Delete{" "}
 											</button>
 										</td>
 									</tr>
 								))}
 							</tbody>
 						</table>
-					)}
-				</div>
-			)}
+					))}
+				{/* Show loading indicator specifically near the table area as well */}
+				{isLoading && !error && <p>Searching...</p>}
+			</div>
 
-			{/* Add/Edit Item Form */}
+			{/* Add/Edit Item Form (remains largely the same) */}
 			<hr />
 			<div>
 				<h2>{editingItemId ? "Edit Item" : "Add New Item"}</h2>
 				<form onSubmit={handleSubmit}>
+					{/* ... Form Inputs ... */}
 					<div style={{ marginBottom: "10px" }}>
 						<label htmlFor='itemName'>Name: </label>
 						<input
@@ -264,7 +310,6 @@ function App() {
 							value={formName}
 							onChange={(e) => setFormName(e.target.value)}
 							required
-							// Disable if EITHER adding or updating
 							disabled={isAdding || isUpdating}
 						/>
 					</div>
@@ -291,33 +336,29 @@ function App() {
 						/>
 					</div>
 
-					{/* Display ADD Error */}
+					{/* Display Add/Update Errors */}
 					{addError && <p style={{ color: "red" }}>{addError}</p>}
-					{/* Display UPDATE Error */}
 					{updateError && <p style={{ color: "red" }}>{updateError}</p>}
 
-					{/* Submit Button - text changes based on mode and loading state */}
+					{/* Submit Button */}
 					<button type='submit' disabled={isAdding || isUpdating}>
-						{
-							editingItemId
-								? isUpdating
-									? "Saving..."
-									: "Save Changes" // In edit mode
-								: isAdding
-								? "Adding..."
-								: "Add Item" // In add mode
-						}
+						{editingItemId
+							? isUpdating
+								? "Saving..."
+								: "Save Changes"
+							: isAdding
+							? "Adding..."
+							: "Add Item"}
 					</button>
-
 					{/* Cancel Edit Button */}
 					{editingItemId && (
 						<button
 							type='button'
 							onClick={resetForm}
-							// Disable only if actively updating this item
 							disabled={isUpdating}
 							style={{ marginLeft: "10px" }}>
-							Cancel Edit
+							{" "}
+							Cancel Edit{" "}
 						</button>
 					)}
 				</form>
