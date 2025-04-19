@@ -160,6 +160,76 @@ app.delete("/api/items/:id", (req, res) => {
 	});
 });
 
+// PUT /api/items/:id - Update an existing inventory item by ID
+app.put("/api/items/:id", (req, res) => {
+	// Extract the item ID from the URL parameters
+	const itemId = req.params.id;
+	// Extract updated item details from the request body
+	const { name, quantity, description } = req.body;
+
+	// --- Input Validation ---
+	// Validate ID
+	const numItemId = parseInt(itemId, 10);
+	if (isNaN(numItemId) || numItemId <= 0) {
+		return res.status(400).json({ error: "Invalid item ID provided." });
+	}
+	// Validate required fields (name, quantity)
+	if (!name || quantity === undefined || quantity === null) {
+		return res
+			.status(400)
+			.json({ error: "Missing required fields: name and quantity" });
+	}
+	// Validate quantity type/value
+	const numQuantity = Number(quantity);
+	if (isNaN(numQuantity) || !Number.isInteger(numQuantity) || numQuantity < 0) {
+		return res
+			.status(400)
+			.json({ error: "Quantity must be a non-negative integer" });
+	}
+
+	// --- Database Update ---
+	const sql = `UPDATE items
+                 SET name = ?,
+                     quantity = ?,
+                     description = ?
+                 WHERE id = ?`;
+	// Use || null for description to ensure it's stored as NULL if empty/missing
+	const params = [name, numQuantity, description || null, numItemId];
+
+	// Use db.run for UPDATE operations
+	db.run(sql, params, function (err) {
+		// Use 'function' to access 'this.changes'
+		if (err) {
+			console.error("Database error updating item:", err.message);
+			return res
+				.status(500)
+				.json({ error: "Failed to update item in database" });
+		}
+		// Check if any row was actually updated
+		if (this.changes === 0) {
+			// If no rows were affected, the item ID likely didn't exist
+			return res
+				.status(404)
+				.json({
+					error: "Item not found with the provided ID. No update performed.",
+				});
+		} else {
+			// If update is successful (this.changes > 0):
+			console.log(`Item with ID: ${numItemId} has been updated.`);
+			// Send back the updated item data
+			// We don't get the full updated row back directly from db.run in sqlite3 standard callback
+			// So, we construct it from the input data and ID.
+			// Alternatively, we could perform a SELECT query afterwards, but this is simpler.
+			res.status(200).json({
+				id: numItemId,
+				name: name,
+				quantity: numQuantity,
+				description: description || null,
+			});
+		}
+	});
+});
+
 // --- Global Error Handler (Basic Example) ---
 // Catches requests to routes that don't exist
 app.use((req, res) => {
