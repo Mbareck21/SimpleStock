@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import "./App.css";
+// Import the new 2025 theme
+import theme2025 from "./styles/theme2025";
+
+// Import components
+import Header from "./components/Header";
+import SearchBar from "./components/SearchBar";
+import InventoryTable from "./components/InventoryTable";
+import ItemForm from "./components/ItemForm";
+import ErrorMessage from "./components/ErrorMessage";
+import LoadingSpinner from "./components/LoadingSpinner";
 
 const API_BASE_URL = "http://localhost:3001/api";
 
@@ -17,19 +27,17 @@ function App() {
 
 	// Edit mode state
 	const [editingItemId, setEditingItemId] = useState(null);
-
-	// Operation States
+	// **Separated** Loading/Error States for Operations
 	const [isAdding, setIsAdding] = useState(false);
 	const [addError, setAddError] = useState(null);
 	const [isUpdating, setIsUpdating] = useState(false);
 	const [updateError, setUpdateError] = useState(null);
 	const [deleteError, setDeleteError] = useState(null);
 
-	// *** NEW: Search State ***
-	const [searchTerm, setSearchTerm] = useState(""); // State for the search input
+	// *** Search State ***
+	const [searchTerm, setSearchTerm] = useState("");
 
 	// --- Data Fetching (Modified) ---
-	// Now accepts the current search term to pass to the API
 	const fetchItems = useCallback(async (currentSearchTerm) => {
 		console.log(`Fetching items with search term: "${currentSearchTerm}"`);
 		setIsLoading(true);
@@ -50,24 +58,22 @@ function App() {
 			const response = await axios.get(`${API_BASE_URL}/items`, { params });
 			setItems(response.data);
 		} catch (err) {
-			console.error("Error fetching items:", err);
-			setError(
-				"Failed to fetch inventory items. Please check connection or backend server.",
-			);
-			setItems([]); // Clear items on error
+			console.error("Error fetching inventory items:", err);
+			const errorMessage =
+				err.response?.data?.error ||
+				"Failed to load inventory. Please try again.";
+			setError(errorMessage);
 		} finally {
 			setIsLoading(false);
 		}
-	}, []); // useCallback dependency array is empty as it doesn't depend on component state directly
+	}, []);
 
-	// --- Effect to Fetch Items on Mount AND when searchTerm changes ---
+	// Initial data fetch
 	useEffect(() => {
-		// This effect now runs initially and whenever 'searchTerm' or 'fetchItems' changes.
-		// We pass the current 'searchTerm' state to fetchItems.
 		fetchItems(searchTerm);
-	}, [searchTerm, fetchItems]); // Add searchTerm to dependency array
+	}, [fetchItems, searchTerm]);
 
-	// --- Reset Form (existing) ---
+	// --- Reset Form ---
 	const resetForm = () => {
 		setFormName("");
 		setFormQuantity("");
@@ -77,7 +83,7 @@ function App() {
 		setUpdateError(null);
 	};
 
-	// --- Start Editing (existing) ---
+	// --- Start Editing ---
 	const handleStartEdit = (item) => {
 		setEditingItemId(item.id);
 		setFormName(item.name);
@@ -85,23 +91,23 @@ function App() {
 		setFormDescription(item.description || "");
 		setAddError(null);
 		setUpdateError(null);
-		window.scrollTo(0, document.body.scrollHeight);
+		// Smooth scroll to form
+		document
+			.getElementById("item-form")
+			?.scrollIntoView({ behavior: "smooth" });
 	};
 
-	// --- Form Submission Handler (existing) ---
+	// --- Form Submission Handler ---
 	const handleSubmit = async (event) => {
 		event.preventDefault();
-		// ... (validation logic remains the same) ...
+
+		// Validation
 		const quantityNum = parseInt(formQuantity, 10);
 		if (!formName.trim() || isNaN(quantityNum) || quantityNum < 0) {
 			if (editingItemId) {
-				setUpdateError(
-					"Please enter a valid item name and a non-negative quantity.",
-				);
+				setUpdateError("Please fill out all required fields correctly.");
 			} else {
-				setAddError(
-					"Please enter a valid item name and a non-negative quantity.",
-				);
+				setAddError("Please fill out all required fields correctly.");
 			}
 			return;
 		}
@@ -112,8 +118,9 @@ function App() {
 			description: formDescription.trim() || null,
 		};
 
+		// --- Call Appropriate API based on mode ---
 		if (editingItemId) {
-			// UPDATE
+			// --- UPDATE ---
 			setUpdateError(null);
 			setIsUpdating(true);
 			try {
@@ -121,13 +128,14 @@ function App() {
 					`${API_BASE_URL}/items/${editingItemId}`,
 					itemData,
 				);
-				// *** RE-FETCH after update to reflect potential search filtering ***
-				// Instead of just updating state locally, re-fetch to ensure consistency with search
-				fetchItems(searchTerm); // <-- Changed this line
-				console.log("Update successful, re-fetching list...");
+				setItems((prevItems) =>
+					prevItems
+						.map((item) => (item.id === editingItemId ? response.data : item))
+						.sort((a, b) => a.name.localeCompare(b.name)),
+				);
+				console.log("Update successful:", response.data);
 				resetForm();
 			} catch (err) {
-				// ... (error handling) ...
 				console.error(`Error updating item:`, err);
 				const backendError =
 					err.response?.data?.error || "An unexpected error occurred.";
@@ -136,17 +144,20 @@ function App() {
 				setIsUpdating(false);
 			}
 		} else {
-			// ADD
+			// --- ADD ---
 			setAddError(null);
 			setIsAdding(true);
 			try {
+				console.log("Adding new item with data:", itemData);
 				const response = await axios.post(`${API_BASE_URL}/items`, itemData);
-				// *** RE-FETCH after add to reflect potential search filtering ***
-				fetchItems(searchTerm); // <-- Changed this line
-				console.log("Add successful, re-fetching list...");
+				setItems((prevItems) =>
+					[...prevItems, response.data].sort((a, b) =>
+						a.name.localeCompare(b.name),
+					),
+				);
+				console.log("Add successful:", response.data);
 				resetForm();
 			} catch (err) {
-				// ... (error handling) ...
 				console.error(`Error adding item:`, err);
 				const backendError =
 					err.response?.data?.error || "An unexpected error occurred.";
@@ -157,7 +168,7 @@ function App() {
 		}
 	};
 
-	// --- Delete Item Logic (Modified) ---
+	// --- Delete Item Logic ---
 	const handleDeleteItem = async (itemIdToDelete) => {
 		if (!window.confirm("Are you sure you want to delete this item?")) {
 			return;
@@ -169,17 +180,15 @@ function App() {
 
 		try {
 			await axios.delete(`${API_BASE_URL}/items/${itemIdToDelete}`);
-			// *** RE-FETCH after delete to update the list correctly based on search ***
-			fetchItems(searchTerm); // <-- Changed this line
-			console.log(
-				`Item ${itemIdToDelete} deleted successfully, re-fetching list.`,
+			setItems((prevItems) =>
+				prevItems.filter((item) => item.id !== itemIdToDelete),
 			);
-			// No need to manually filter state if we re-fetch
+			// Clear other errors on successful delete
 			setAddError(null);
 			setUpdateError(null);
 			setError(null);
+			console.log(`Item ${itemIdToDelete} deleted successfully.`);
 		} catch (err) {
-			// ... (error handling) ...
 			console.error(`Error deleting item with ID ${itemIdToDelete}:`, err);
 			const backendError =
 				err.response?.data?.error || "An unexpected error occurred.";
@@ -189,180 +198,176 @@ function App() {
 		}
 	};
 
-	// --- Rendering Logic ---
+	// Handle search with debounce
+	const handleSearch = (value) => {
+		setSearchTerm(value);
+		// Simple debounce
+		const timeoutId = setTimeout(() => {
+			fetchItems(value);
+		}, 300);
+
+		return () => clearTimeout(timeoutId);
+	};
+
 	return (
-		<div className='App'>
-			<h1>SimpleStock Inventory</h1>
+		<div
+			style={{
+				// Use CSS variables for background and font for themeability
+				backgroundColor: "var(--color-background)",
+				minHeight: "100vh",
+				fontFamily: "var(--font-family-sans)",
+				color: "var(--color-text-primary)", // Set default text color
+				transition: "background-color 0.3s ease, color 0.3s ease", // Smooth theme transitions
+			}}>
+			{/* Header Component - Will need updating separately */}
+			<Header />
 
-			{/* --- Search Bar --- */}
-			<div
-				style={{ margin: "20px 0", padding: "10px", border: "1px solid #ccc" }}>
-				<label htmlFor='searchItems' style={{ marginRight: "10px" }}>
-					Search Items:
-				</label>
-				<input
-					type='text'
-					id='searchItems'
-					placeholder='Search by name or description...'
-					value={searchTerm}
-					onChange={(e) => setSearchTerm(e.target.value)} // Update state on change
-					style={{ width: "300px", padding: "5px" }}
-					disabled={isLoading} // Optional: disable during initial load
-				/>
-				{/* Optional: Button to clear search */}
-				<button
-					onClick={() => setSearchTerm("")}
-					disabled={!searchTerm || isLoading} // Disable if no term or loading
-					style={{ marginLeft: "10px" }}>
-					Clear Search
-				</button>
-			</div>
+			{/* Main Content */}
+			<main
+				style={{
+					maxWidth: "1200px",
+					margin: "0 auto",
+					// Use theme variables for spacing
+					padding: `var(--spacing-6) var(--spacing-8)`,
+					// Use theme animation
+					animation: `${theme2025.animations.variants.fadeIn} 0.5s ease-out`,
+				}}>
+				{/* Search Bar - Will need updating separately */}
+				<div style={{ marginBottom: `var(--spacing-8)` }}>
+					<SearchBar
+						searchTerm={searchTerm}
+						setSearchTerm={setSearchTerm}
+						onSearch={handleSearch}
+					/>
+				</div>
 
-			{/* Display Global Errors/Loading */}
-			{/* (Keep isLoading display for clarity during search fetches) */}
-			{isLoading && <p>Loading inventory...</p>}
-			{error && <p style={{ color: "red" }}>{error}</p>}
-			{deleteError && <p style={{ color: "red" }}>{deleteError}</p>}
+				{/* Error Display - Will need updating separately */}
+				{error && (
+					<div style={{ marginBottom: `var(--spacing-6)` }}>
+						<ErrorMessage message={error} />
+					</div>
+				)}
+				{deleteError && (
+					<div style={{ marginBottom: `var(--spacing-6)` }}>
+						<ErrorMessage message={deleteError} />
+					</div>
+				)}
 
-			{/* Display Item List */}
-			{/* Show list section even if loading, the table itself depends on !isLoading */}
-			<div>
-				<h2>Current Stock {searchTerm && `(Filtered by: "${searchTerm}")`}</h2>
-				{/* Only show table when not loading AND no general fetch error */}
-				{!isLoading &&
-					!error &&
-					(items.length === 0 ? (
-						<p>
-							{searchTerm
-								? "No items match your search."
-								: "No items currently in stock."}
-						</p>
-					) : (
-						<table
-							border='1'
+				{/* Inventory Section */}
+				<section style={{ marginBottom: `var(--spacing-12)` }}>
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "space-between",
+							marginBottom: `var(--spacing-6)`,
+						}}>
+						<h2
 							style={{
-								width: "100%",
-								borderCollapse: "collapse",
-								marginBottom: "20px",
+								// Use theme variables for typography
+								fontSize: `var(--font-size-3xl)`,
+								fontWeight: `var(--font-weight-bold)`,
+								color: `var(--color-text-primary)`,
 							}}>
-							{/* ... Table Head ... */}
-							<thead>
-								<tr>
-									<th style={{ padding: "5px" }}>Name</th>
-									<th style={{ padding: "5px" }}>Quantity</th>
-									<th style={{ padding: "5px" }}>Description</th>
-									<th style={{ padding: "5px", width: "120px" }}>Actions</th>
-								</tr>
-							</thead>
-							{/* ... Table Body ... */}
-							<tbody>
-								{items.map((item) => (
-									<tr
-										key={item.id}
-										style={
-											editingItemId === item.id
-												? { backgroundColor: "#e0f7fa" }
-												: {}
-										}>
-										<td style={{ padding: "5px" }}>{item.name}</td>
-										<td style={{ padding: "5px", textAlign: "right" }}>
-											{item.quantity}
-										</td>
-										<td style={{ padding: "5px" }}>{item.description}</td>
-										<td style={{ padding: "5px", textAlign: "center" }}>
-											{/* Action Buttons (disable based on operation state) */}
-											<button
-												onClick={() => handleStartEdit(item)}
-												disabled={
-													isAdding || isUpdating || editingItemId === item.id
-												}
-												style={{ marginRight: "5px" }}>
-												{" "}
-												Edit{" "}
-											</button>
-											<button
-												onClick={() => handleDeleteItem(item.id)}
-												disabled={isAdding || isUpdating}>
-												{" "}
-												Delete{" "}
-											</button>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					))}
-				{/* Show loading indicator specifically near the table area as well */}
-				{isLoading && !error && <p>Searching...</p>}
-			</div>
-
-			{/* Add/Edit Item Form (remains largely the same) */}
-			<hr />
-			<div>
-				<h2>{editingItemId ? "Edit Item" : "Add New Item"}</h2>
-				<form onSubmit={handleSubmit}>
-					{/* ... Form Inputs ... */}
-					<div style={{ marginBottom: "10px" }}>
-						<label htmlFor='itemName'>Name: </label>
-						<input
-							type='text'
-							id='itemName'
-							value={formName}
-							onChange={(e) => setFormName(e.target.value)}
-							required
-							disabled={isAdding || isUpdating}
-						/>
-					</div>
-					<div style={{ marginBottom: "10px" }}>
-						<label htmlFor='itemQuantity'>Quantity: </label>
-						<input
-							type='number'
-							id='itemQuantity'
-							value={formQuantity}
-							onChange={(e) => setFormQuantity(e.target.value)}
-							required
-							min='0'
-							disabled={isAdding || isUpdating}
-						/>
-					</div>
-					<div style={{ marginBottom: "10px" }}>
-						<label htmlFor='itemDescription'>Description: </label>
-						<input
-							type='text'
-							id='itemDescription'
-							value={formDescription}
-							onChange={(e) => setFormDescription(e.target.value)}
-							disabled={isAdding || isUpdating}
-						/>
+							Inventory
+						</h2>
+						<div
+							style={{
+								fontSize: `var(--font-size-sm)`,
+								color: `var(--color-text-secondary)`,
+							}}>
+							{items.length} {items.length === 1 ? "item" : "items"} in stock
+						</div>
 					</div>
 
-					{/* Display Add/Update Errors */}
-					{addError && <p style={{ color: "red" }}>{addError}</p>}
-					{updateError && <p style={{ color: "red" }}>{updateError}</p>}
-
-					{/* Submit Button */}
-					<button type='submit' disabled={isAdding || isUpdating}>
-						{editingItemId
-							? isUpdating
-								? "Saving..."
-								: "Save Changes"
-							: isAdding
-							? "Adding..."
-							: "Add Item"}
-					</button>
-					{/* Cancel Edit Button */}
-					{editingItemId && (
-						<button
-							type='button'
-							onClick={resetForm}
-							disabled={isUpdating}
-							style={{ marginLeft: "10px" }}>
-							{" "}
-							Cancel Edit{" "}
-						</button>
+					{/* Loading State */}
+					{isLoading ? (
+						<div
+							style={{
+								// Use default card style from the new theme
+								...theme2025.styles.card.default,
+								padding: `var(--spacing-12)`,
+								textAlign: "center",
+							}}>
+							<div
+								style={{
+									display: "flex",
+									justifyContent: "center",
+									marginBottom: `var(--spacing-4)`,
+								}}>
+								{/* LoadingSpinner will need updating separately */}
+								<LoadingSpinner size='lg' />
+							</div>
+							<p style={{ color: `var(--color-text-secondary)` }}>
+								Loading inventory items...
+							</p>
+						</div>
+					) : (
+						// InventoryTable will need updating separately
+						<InventoryTable
+							items={items}
+							editingItemId={editingItemId}
+							handleStartEdit={handleStartEdit}
+							handleDeleteItem={handleDeleteItem}
+							isAdding={isAdding}
+							isUpdating={isUpdating}
+							searchTerm={searchTerm}
+						/>
 					)}
-				</form>
-			</div>
+				</section>
+
+				{/* Form Section */}
+				<section
+					id='item-form'
+					style={{
+						marginBottom: `var(--spacing-16)`,
+						scrollMarginTop: "5rem", // Adjust for potentially sticky header later
+					}}>
+					<div
+						style={{
+							// Use default card style from the new theme
+							...theme2025.styles.card.default,
+						}}>
+						{/* ItemForm will need updating separately */}
+						<ItemForm
+							editingItemId={editingItemId}
+							formName={formName}
+							setFormName={setFormName}
+							formQuantity={formQuantity}
+							setFormQuantity={setFormQuantity}
+							formDescription={formDescription}
+							setFormDescription={setFormDescription}
+							handleSubmit={handleSubmit}
+							resetForm={resetForm}
+							isAdding={isAdding}
+							isUpdating={isUpdating}
+							addError={addError}
+							updateError={updateError}
+						/>
+					</div>
+				</section>
+			</main>
+
+			{/* Footer */}
+			<footer
+				style={{
+					backgroundColor: `var(--color-surface-variant)`,
+					borderTop: `1px solid var(--color-divider)`,
+					padding: `var(--spacing-4)`,
+					marginTop: `var(--spacing-16)`,
+				}}>
+				<div
+					style={{
+						maxWidth: "1200px",
+						margin: "0 auto",
+						textAlign: "center",
+						fontSize: `var(--font-size-sm)`,
+						color: `var(--color-text-secondary)`,
+					}}>
+					&copy; {new Date().getFullYear()} SimpleStock Inventory Management
+					System
+				</div>
+			</footer>
 		</div>
 	);
 }
